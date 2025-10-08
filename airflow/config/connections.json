@@ -1,0 +1,12 @@
+{
+  "spark_connection": {
+    "conn_type": "spark",
+    "description": "A simple Spark standalone connection.",
+    "login": null,
+    "password": null,
+    "host": "spark://spark-master",
+    "port": 7077,
+    "schema": null,
+    "extra": "{\n  \"queue\": null,\n  \"deploy-mode\": \"client\",\n  \"spark-binary\": \"spark-submit\",\n  \"namespace\": null,\n  \"principal\": null,\n  \"keytab\": null\n}"
+  }
+}

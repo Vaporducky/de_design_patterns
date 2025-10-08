@@ -1,0 +1,12 @@
+{
+  "spark_connection_id": "spark_connection",
+  "spark_jar_home": "/opt/data/jars",
+  "data": {
+    "base_data": "/opt/data/",
+    "idempotent": "/opt/data/idempotent",
+    "spark_warehouse": "/opt/data/spark_data"
+  },
+  "code": {
+    "pipelines_path": "/opt/code/patterns"
+  }
+}
