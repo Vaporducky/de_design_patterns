@@ -136,7 +136,7 @@ def data_overwrite():
     def _create_build_pyfiles(**context):
         job_name = context["params"]["job_name"]
         # Define outputs
-        base_name: Path = CODE_PATH / "build" / f"{job_name}_src"
+        base_name: Path = CODE_PATH / "build" / f"{job_name}_src_build"
         root_dir: Path = CODE_PATH / "src"
 
         if base_name.exists() and base_name.is_file():
