@@ -280,7 +280,7 @@ class LatestPartitionStrategy(strategy.Strategy):
         latest_partition: DataFrame = (
             df
             .select(*partitions)
-            .orderBy(F.desc(*partitions))
+            .sort(*partitions, ascending=False)
             .limit(1)
         )
 
@@ -293,10 +293,10 @@ class LatestPartitionStrategy(strategy.Strategy):
         # Extract the value from the row
         latest_partition_value: dict = latest_partition_value.asDict()
 
-        predicate = " AND ".join(
-            f"`{partition}` > {value}"
+        predicate: str = "    " + "AND ".join(
+            f"`{partition}` > {value}\n"
             for partition, value in latest_partition_value.items()
-        )
+        ).strip("\n")
 
         return predicate
 
