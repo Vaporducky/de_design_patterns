@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "common_pipeline_code"
+version = "0.1.0"
+authors = [
+    {name = "Enrique Fonseca", email = "aesthetic.datum@gmail.com"}
+]
+description = "Common utilities to standardize methods across pipelines."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-ulid==2.2.0",
+    "PyYAML==6.0.3",
+    "pyspark==3.5.6"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
