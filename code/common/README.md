@@ -30,6 +30,8 @@ exists.
 pip install project-name
 ```
 
+---
+
 ## Changelog
 ### v0.1.0
 - `subfeature/create_pattern_package`
