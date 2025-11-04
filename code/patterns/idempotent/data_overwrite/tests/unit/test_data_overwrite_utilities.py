@@ -36,15 +36,14 @@ class TestDataOverwriteUtilities(TestCase):
         pass
 
     @parameterized.expand([
-        ("string_partition", ["scenario"], False, "    `scenario` > 1"),
-        ("column_partition", ["scenario"], True, "    `scenario` > 1"),
+        ("string_partition", ["scenario"], False),
+        ("column_partition", ["scenario"], True),
     ])
     def test_latest_partition_strategy_single_partition(
             self,
             _: str,
             partitions: list[str | Column],
-            col_flag: bool,
-            expected_predicate
+            col_flag: bool
     ):
         # Convert to PySpark column
         if col_flag:
@@ -55,38 +54,35 @@ class TestDataOverwriteUtilities(TestCase):
             schema="scenario int, value int"
         )
 
-        actual_predicate: str = (
+        expected_predicate = (
+            F.lit(True)
+            & (
+                F.when(F.col("scenario").isNull(), F.lit(True))
+                .otherwise(F.column("scenario") > 1)
+            )
+        )
+
+        actual_predicate = (
             utilities
             .LatestPartitionStrategy
-            .execute(df, partitions=partitions)
+            .execute(df, partition_cols=partitions)
         )
 
         self.assertEqual(
-            expected_predicate,
-            actual_predicate,
-            msg=f"{expected_predicate} <> {actual_predicate}"
+            str(expected_predicate),
+            str(actual_predicate),
+            msg=f"{str(expected_predicate)} <> {str(actual_predicate)}"
         )
 
     @parameterized.expand([
-        (
-            "string_partition",
-            ["scenario", "day"],
-            False,
-            "    `scenario` > 1\nAND `day` > 2"
-        ),
-        (
-            "string_partition",
-            ["scenario", "day"],
-            True,
-            "    `scenario` > 1\nAND `day` > 2"
-        ),
+        ("string_partition", ["scenario", "day"], False),
+        ("string_partition", ["scenario", "day"], True)
     ])
     def test_latest_partition_strategy_multiple_partitions(
             self,
             _: str,
             partitions: list[str | Column],
-            col_flag: bool,
-            expected_predicate
+            col_flag: bool
     ):
         # Convert to PySpark column
         if col_flag:
@@ -97,16 +93,34 @@ class TestDataOverwriteUtilities(TestCase):
             schema="scenario int, day int, value int"
         )
 
-        actual_predicate: str = (
+        expected_predicate = (
+            F.lit(True)
+            & (
+                F.when(F.col("scenario").isNull(), F.lit(True))
+                .otherwise(F.col("scenario") > 1)
+            ) &
+            (
+                F.when(F.col("day").isNull(), F.lit(True))
+                .otherwise(F.col("day") > 2)
+            )
+        )
+
+        actual_predicate = (
             utilities
             .LatestPartitionStrategy
-            .execute(df, partitions=partitions)
+            .execute(df, partition_cols=partitions)
         )
 
         self.assertEqual(
-            expected_predicate,
-            actual_predicate,
-            msg=f"{expected_predicate} <> {actual_predicate}"
+            str(expected_predicate),
+            str(actual_predicate),
+            msg=f"{str(expected_predicate)} <> {str(actual_predicate)}"
         )
 
+    def test_latest_partition_strategy_empty_dataframe(self):
+        df: DataFrame = self.spark.createDataFrame(data=([]),
+                                                   schema="scenario int")
 
+        with self.assertRaisesRegex(ValueError,
+                                    "Cannot find the latest partition."):
+            utilities.LatestPartitionStrategy.execute(df, ["scenario"])

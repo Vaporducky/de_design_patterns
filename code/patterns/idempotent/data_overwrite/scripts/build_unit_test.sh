@@ -11,4 +11,4 @@ TEST_PATH=${BASE_PATH}/${PATTERN}/${JOB_NAME}/tests
 bash code/build_common/code_executor/execute_python.sh \
     --module pytest \
     --common "${BASE_PATH}/${PATTERN}/${JOB_NAME}" \
-    -- -v ${TEST_PATH}/unit
+    -- -rsfxv ${TEST_PATH}/unit

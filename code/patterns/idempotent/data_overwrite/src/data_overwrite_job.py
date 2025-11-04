@@ -1,3 +1,4 @@
+import json
 import logging
 from pprint import pformat
 
@@ -172,7 +173,7 @@ class DataOverwriteJob:
         )
 
         logging.info(f"Writing data for scenario `{scenario}`.")
-        # Write to the Spark warehouse inside the Airflow container
+        # Load required data per scenario
         (
             df.write
             .partitionBy("__year_week_of_year__")
@@ -186,138 +187,65 @@ class DataOverwriteJob:
 
     def _is_freshly_built_delta_table(self, table_location: str) -> bool:
         """Check if a Delta table is freshly created based on its version."""
-        history = (
-            delta.DeltaTable
-            .forPath(self.spark, table_location)
-            .history()
-        )
+        logging.info(f"Checking if Delta table is freshly created.")
 
+        history = (delta.DeltaTable
+                   .forPath(self.spark, table_location)
+                   .history())
+        history.show(truncate=False)
         # If history is empty (i.e., no logs exist), the table is freshly
         # created
         if not history.head(1):
             return True
 
         # Otherwise, check the version of the latest entry in the history
-        latest_version = history.head(1)[0]['version']
+        latest_version = history.head(1)[0]["version"]
 
         # If the latest version is 0, the table is freshly created
         return latest_version == 0
 
+    def _parse_partitions(self):
+        data = [
+            (v,)
+            for values in self._job_args.partitions.values() for v in values
+        ]
+        schema = list(self._job_args.partitions.keys())
+
+        partition_df = self.spark.createDataFrame(data=data, schema=schema)
+
+        return partition_df
+
     def _partition_processing(self,
                               src_location: str,
                               tgt_location: str,
-                              partitions: str) -> None:
-        # Define helper functions
-        def _predicate_factory(_partitions: str, _table_location: str):
-            """
-            Construct a partition predicate map for a Delta table.
+                              partitions: dict) -> None:
+        # Create partitioning strategy. It will create a partition predicate
+        logging.info("Partition processing started.")
+        partition_context = utilities.PartitionStrategyContext()
 
-            Reads the specified Delta table to determine the latest `year_woy`
-            partition and returns a dictionary mapping a boolean flag to two
-            types of predicates:
-              - If True: use the provided `_partitions` string as an `IN`
-                         clause.
-              - If False: filter for partitions newer than the latest existing
-                          partition.
+        logging.info(f"Creating partition predicate.")
 
-            Args:
-                _partitions (str): A comma-separated list of partition values
-                                   for the `IN` clause.
-                _table_location (str): The path to the Delta table to inspect.
+        df_partition_source: DataFrame = (
+            self.spark.read.format("delta").load(tgt_location)
+        )
 
-            Returns:
-                dict[bool, str | Column]: A mapping which contains predicate
-                                          partitioning corresponding to a
-                                          strategy.
-
-            Raises:
-                ValueError: If the table contains no partitions or the latest
-                            partition cannot be determined.
-            """
-            logging.info(f"Retrieving latest partition in `{_table_location}`")
-            # Determine the latest partition (lazy evaluation)
-            latest_partition: DataFrame = (
-                self.spark.read
-                .format("delta")
-                .load(_table_location)
-                .select("year_woy")
-                .orderBy(F.desc("year_woy"))
-                .limit(1)
-            )
-
-            # Get the latest partition value safely
-            latest_partition_value = latest_partition.first()
-
-            if latest_partition_value is None:
-                raise ValueError(f"Cannot find latest partition for table at "
-                                 f"{_table_location}")
-
-            # Extract the value from the row
-            latest_partition_value = latest_partition_value[0]
-
-            # Construct the partition predicate map
-            partition_predicate_map = {
-                True: f"year_woy IN ({_partitions})",
-                False: F.col("year_woy") > latest_partition_value
-            }
-
-            return partition_predicate_map
-
-        def _writer_factory(df: DataFrame, _predicate: str):
-            base_writer: DataFrameWriter = (
-                df
-                .write
-                .partitionBy("year_woy")
-                .format("delta")
-                .mode("overwrite")
-            )
-
-            # Define factory
-            writer_factory = {
-                True: base_writer.option("replaceWhere", _predicate),
-                False: base_writer
-            }
-
-            return writer_factory
-
-        if self._is_freshly_built_delta_table(table_location=tgt_location):
+        if self._job_args.backfill:
             logging.info(f"Fresh build. Processing all the data for the "
                          f"target definition at `{tgt_location}`.")
-            logging.info("Retrieving target table definition.")
-            predicate = "1 = 1"
-            daily_activity_df: DataFrame = (
-                self.tgt_table_definition.get_table_definition(
-                    schema="idempotent",
-                    table="daily_activity",
-                    table_location=src_location,
-                    predicate=predicate
-                )
-            )
-            daily_activity_df.show()
-            logging.info(f"Schema: {daily_activity_df.schema}")
-            # Write to table
-            daily_activity_df.write.format("delta").mode("append").partitionBy("year_woy").save(tgt_location)
-
-            logging.info("Partition processing ended.")
-
-            return
-
-        logging.info("Partition processing started.")
-        if partitions:
+            predicate = partition_context.execute_strategy("trivial")
+        elif partitions:
             logging.info(
-                f"Starting reprocessing process of the following partitions:",
-                pformat(partitions)
+                f"Starting reprocessing process of the following partitions:"
+                f"{pformat(partitions)}"
             )
+            partitions_df = self._parse_partitions()
+            predicate = partition_context.execute_strategy("cherry_pick",
+                                                           partitions_df)
         else:
             logging.info(f"Processing new partitions.")
-
-        # Build predicate
-        predicate = _predicate_factory(
-            _partitions=partitions,
-            _table_location=tgt_location
-        )[bool(partitions)]
-
-        logging.info(f"Partition predicate: {predicate}")
+            predicate = partition_context.execute_strategy("latest",
+                                                           df_partition_source,
+                                                           ("year_woy",))
 
         # Factory table
         logging.info("Retrieving target table definition.")
@@ -330,16 +258,32 @@ class DataOverwriteJob:
             )
         )
 
+        logging.info(f"Target count: `{daily_activity_df.count()}`")
+        delta_tgt_table = delta.DeltaTable.forPath(self.spark, tgt_location)
+        partition_cols = delta_tgt_table.detail().select("partitionColumns").first()[0]
+        logging.info(f"Partitions before writing: {delta_tgt_table.toDF().select(*partition_cols).count()}")
+
         # Write to table
         logging.info(f"Writing to target table: `{tgt_location}`")
+        # delta.DeltaTable.forPath(self.spark, tgt_location).delete(predicate)
+        self.spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
         (
-            _writer_factory(daily_activity_df, predicate)[bool(partitions)]
+            daily_activity_df
+            .write
+            .partitionBy("year_woy")
+            .format("delta")
+            .mode("overwrite")
             .save(tgt_location)
         )
+        self.spark.conf.set("spark.sql.sources.partitionOverwriteMode", "STATIC")
+
+        delta_tgt_table = delta.DeltaTable.forPath(self.spark, tgt_location)
+        logging.info(f"After before writing: {delta_tgt_table.toDF().select(*partition_cols).count()}")
 
         logging.info("Partition processing ended.")
     
     def run(self):
+        self.spark.sparkContext.setLogLevel("WARN")
         logging.info(f"Table namespace mapping: {self.table_namespace_mapping}")
         logging.info(f"Table warehouse mapping: {self.table_wh_location_mapping}")
 
