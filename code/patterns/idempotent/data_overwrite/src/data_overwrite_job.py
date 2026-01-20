@@ -1,17 +1,11 @@
-import json
 import logging
 from pprint import pformat
 
 import delta
-from pyspark.sql import (
-    SparkSession,
-    DataFrame,
-    DataFrameWriter,
-    functions as F,
-)
+from pyspark.sql import DataFrame, SparkSession
 
-import src.data_overwrite_utilities as utilities
 import src.data_overwrite_constants as constants
+import src.data_overwrite_utilities as utilities
 
 
 class DataOverwriteJob:

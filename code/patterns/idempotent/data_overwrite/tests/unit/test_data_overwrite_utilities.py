@@ -1,10 +1,10 @@
 from unittest import TestCase
-from unittest.mock import patch, MagicMock, ANY
 
 import pytest
 from parameterized import parameterized
-from pyspark.sql import SparkSession, DataFrame, functions as F, Column
 from pyspark.conf import SparkConf
+from pyspark.sql import Column, DataFrame, SparkSession
+from pyspark.sql import functions as F
 
 import src.data_overwrite_utilities as utilities
 from tests.tests_constants import SPARK_CONFIGURATION

@@ -1,18 +1,18 @@
-import json
 import argparse
+import json
 import logging
 import os
 from abc import ABC
 from dataclasses import dataclass
-from typing import Optional, Callable, Iterable, Any
 from distutils.util import strtobool
-
-import delta
-from delta.tables import DeltaTableBuilder
-from pyspark.sql import SparkSession, DataFrame, functions as F, Column
-from pyspark.sql.types import LongType, DateType, StringType, IntegerType, Row
+from typing import Callable, Iterable, Optional
 
 import base.strategy as strategy
+import delta
+from delta.tables import DeltaTableBuilder
+from pyspark.sql import Column, DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import DateType, IntegerType, LongType, Row, StringType
 
 
 @dataclass
