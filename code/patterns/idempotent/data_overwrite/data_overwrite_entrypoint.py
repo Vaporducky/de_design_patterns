@@ -1,7 +1,7 @@
-import sys
 import logging
 
 import common_utilities
+
 import src.data_overwrite_utilities as utilities
 from src.data_overwrite_job import DataOverwriteJob
 

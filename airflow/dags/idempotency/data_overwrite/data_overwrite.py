@@ -52,7 +52,7 @@ CODE_PATH: Path = Path(f"{PIPELINES_PATH}/{PATTERN}/{USE_CASE}")
 
 # Runtime defaults
 DEFAULT_ARGS = {
-    "retries": 1,
+    "retries": 0,
     "retry_exponential_backoff": True,
     "max_retry_delay": pendulum.duration(seconds=10),
     "retry_delay": pendulum.duration(seconds=5),
@@ -136,7 +136,7 @@ def data_overwrite():
     def _create_build_pyfiles(**context):
         job_name = context["params"]["job_name"]
         # Define outputs
-        base_name: Path = CODE_PATH / "build" / f"{job_name}_src"
+        base_name: Path = Path("tmp") / "build" / f"{job_name}_src_build"
         root_dir: Path = CODE_PATH / "src"
 
         if base_name.exists() and base_name.is_file():
@@ -161,7 +161,7 @@ def data_overwrite():
         application=(CODE_PATH / "data_overwrite_entrypoint.py").as_posix(),
         conn_id=SPARK_CONN_ID,
         packages=DELTA_PACKAGE,
-        py_files=(CODE_PATH / "build" / "data_overwrite_src.zip").as_posix(),
+        py_files=(Path("tmp") / "build" / "data_overwrite_src_build.zip").as_posix(),
         application_args=_build_spark_args(),
         env_vars=SPARK_ENV,
         conf=SPARK_DELTA_CONFIG,

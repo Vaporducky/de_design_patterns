@@ -1,25 +1,25 @@
-import json
 import argparse
+import json
 import logging
 import os
 from abc import ABC
 from dataclasses import dataclass
-from typing import Optional, Callable, Any, Iterable
 from distutils.util import strtobool
-
-import delta
-from delta.tables import DeltaTableBuilder
-from pyspark.sql import SparkSession, DataFrame, functions as F, Column
-from pyspark.sql.types import LongType, DateType, StringType, IntegerType, Row
+from typing import Callable, Iterable, Optional
 
 import base.strategy as strategy
+import delta
+from delta.tables import DeltaTableBuilder
+from pyspark.sql import Column, DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import DateType, IntegerType, LongType, Row, StringType
 
 
 @dataclass
 class JobArguments:
     job_name: str
     scenario: int
-    partitions: str
+    partitions: dict
     table_name: str
     schema_name: str
     backfill: bool
@@ -46,10 +46,10 @@ class JobArguments:
         )
         parser.add_argument(
             "--partitions", "-p",
-            type=str,
+            type=json.loads,
             default="",
             required=False,
-            help="Partitions to process e.g. ['p1', 'p2', ...]"
+            help="""Partitions to process e.g. '"year": [2021, ...]' """
         )
         parser.add_argument(
             "--table_name", "-t",
@@ -190,7 +190,7 @@ class TargetDeltaTableDefinition(TableDefinition):
         # Apply predicate on target definition
         target_definition: DataFrame = (
             self.spark.read
-            .format("parquet")
+            .format("delta")
             .load(table_location)
             .select(
                 F.col("__year_week_of_year__").alias("year_woy"),
@@ -198,7 +198,11 @@ class TargetDeltaTableDefinition(TableDefinition):
             )
             .where(predicate)
             .groupBy("year_woy")
-            .agg(F.count_distinct("user_id").cast(IntegerType()).alias("distinct_daily_users"))
+            .agg(
+                F.count_distinct("user_id")
+                .cast(IntegerType())
+                .alias("distinct_daily_users")
+            )
         )
 
         return target_definition
@@ -273,14 +277,19 @@ def table_namespace_builder(schema: str, table: str) -> str:
 
 
 class LatestPartitionStrategy(strategy.Strategy):
+    """
+    Given a target dataframe `df`, retrieve the latest partition to create a
+    predicate to filter out an arbitrary source DataFrame (we would like to
+    ingest only data greater than the latest partition)
+    """
     @staticmethod
-    def execute(df: DataFrame, partitions: Iterable[str | Column]) -> Any:
+    def execute(df: DataFrame, partition_cols: Iterable[str | Column] = None) -> Column:
         logging.info(f"Retrieving latest partition.")
-        # Determine the latest partition (lazy evaluation)
+        # Determine the latest partition
         latest_partition: DataFrame = (
             df
-            .select(*partitions)
-            .orderBy(F.desc(*partitions))
+            .select(*partition_cols)
+            .sort(*partition_cols, ascending=False)
             .limit(1)
         )
 
@@ -288,88 +297,100 @@ class LatestPartitionStrategy(strategy.Strategy):
         latest_partition_value: Row = latest_partition.first()
 
         if latest_partition_value is None:
-            raise ValueError(f"Cannot find the latest partition.")
+            raise ValueError("Cannot find the latest partition.")
 
         # Extract the value from the row
         latest_partition_value: dict = latest_partition_value.asDict()
 
-        predicate = " AND ".join(
-            f"`{partition}` > {value}"
-            for partition, value in latest_partition_value.items()
-        )
+        # Logical equivalent of 1=1
+        predicate = F.lit(True)
+        for partition, value in latest_partition_value.items():
+            atomic_predicate = (
+                F.when(F.col(partition).isNull(), F.lit(True))
+                .otherwise(F.col(partition) > value)
+            )
+            predicate &= atomic_predicate
 
         return predicate
 
-    # def _partition_processing(self,
-    #                           src_location: str,
-    #                           tgt_location: str,
-    #                           partitions: str) -> None:
-    #     # Define helper functions
-    #     def _predicate_factory(_partitions: str, _table_location: str):
-    #         logging.info(f"Retrieving latest partition in `{_table_location}`")
-    #         # Determine the latest partition (lazy evaluation)
-    #         latest_partition: DataFrame = (
-    #             self.spark.read
-    #             .format("delta")
-    #             .load(_table_location)
-    #             .select("year_woy")
-    #             .orderBy(F.desc("year_woy"))
-    #             .limit(1)
-    #         )
-    #
-    #         # Get the latest partition value safely
-    #         latest_partition_value = latest_partition.first()
-    #
-    #         if latest_partition_value is None:
-    #             raise ValueError(f"Cannot find latest partition for table at "
-    #                              f"{_table_location}")
-    #
-    #         # Extract the value from the row
-    #         latest_partition_value = latest_partition_value[0]
-    #
-    #         # Construct the partition predicate map
-    #         partition_predicate_map = {
-    #             True: f"year_woy IN ({_partitions})",
-    #             False: F.col("year_woy") > latest_partition_value
-    #         }
-    #
-    #         return partition_predicate_map
-    #
-    #     def _writer_factory(df: DataFrame, _predicate: str):
-    #         base_writer: DataFrameWriter = (
-    #             df
-    #             .write
-    #             .partitionBy("year_woy")
-    #             .format("delta")
-    #             .mode("overwrite")
-    #         )
-    #
-    #         # Define factory
-    #         writer_factory = {
-    #             True: base_writer.option("replaceWhere", _predicate),
-    #             False: base_writer
-    #         }
-    #
-    #         return writer_factory
-    #
-    #     if self._is_freshly_built_delta_table(table_location=tgt_location):
-    #         logging.info(f"Fresh build. Processing all the data for the "
-    #                      f"target definition at `{tgt_location}`.")
-    #         logging.info("Retrieving target table definition.")
-    #         predicate = "1 = 1"
-    #         daily_activity_df: DataFrame = (
-    #             self.tgt_table_definition.get_table_definition(
-    #                 schema="idempotent",
-    #                 table="daily_activity",
-    #                 table_location=src_location,
-    #                 predicate=predicate
-    #             )
-    #         )
-    #         daily_activity_df.show()
-    #         logging.info(f"Schema: {daily_activity_df.schema}")
-    #         # Write to table
-    #         daily_activity_df.write.format("delta").mode("append").partitionBy("year_woy").save(tgt_location)
-    #
-    #         logging.info("Partition processing ended.")
-    #
-    #         return
+
+class CherryPickPartitionsStrategy(strategy.Strategy):
+    @staticmethod
+    def execute(partitions_df: DataFrame) -> Column:
+        logging.info(f"Starting `Cherry Pick` partition strategy")
+        partitions = partitions_df.collect()
+        fields = partitions_df.columns
+
+        # Initialize filter condition (since we are using `OR`, we set the
+        # initial value as `False`)
+        filter_condition = F.lit(False)
+
+        for partition in partitions:
+            # Initialize combined partition predicate
+            combined_column_condition = F.lit(True)
+            for field in fields:
+                # Generate atomic predicate
+                column_condition = (
+                    F.when(F.col(field).isNull(), F.lit(True))
+                    .otherwise(F.col(field) == partition[field])
+                )
+
+                # Append to combined partition predicate (AND)
+                combined_column_condition &= column_condition
+
+            # Append to predicate (OR)
+            filter_condition |= combined_column_condition
+
+        return filter_condition
+
+
+class TrivialPartitionsStrategy(strategy.Strategy):
+    @staticmethod
+    def execute() -> Column:
+        return F.lit(True)
+
+
+class PartitionStrategyContext:
+    _strategies: dict[str, strategy.Strategy] = {
+        "latest": LatestPartitionStrategy,
+        "cherry_pick": CherryPickPartitionsStrategy,
+        "trivial": TrivialPartitionsStrategy,
+    }
+
+    @staticmethod
+    def _get_strategy(strategy_name: str) -> strategy.Strategy:
+        """
+        Returns an instance of a strategy based on the given name.
+
+        Args:
+            strategy_name (str): The key representing the desired
+                strategy.
+        Raises:
+            ValueError: If the strategy name is not supported.
+
+        Returns:
+            Strategy: An instance of the requested strategy.
+        """
+        strategy_class = PartitionStrategyContext._strategies.get(strategy_name.lower())
+        if strategy_class is None:
+            raise ValueError(f"Strategy `{strategy_name}` is not supported.")
+
+        return strategy_class
+
+    def execute_strategy(self, strategy_name, *args, **kwargs) -> Column:
+        """
+        Executes the current strategy with the provided arguments.
+
+        Args:
+            *args: Positional arguments.
+            **kwargs: Keyword arguments.
+
+        Returns:
+            Any: The result from the strategy's execution.
+        """
+        logging.info("Entering partition strategy context.")
+        logging.info(f"Executing partition strategy: `{strategy_name}`")
+        logging.info(f"With args: {args}")
+        logging.info(f"With kwargs: {kwargs}")
+
+        return self._get_strategy(strategy_name).execute(*args, **kwargs)

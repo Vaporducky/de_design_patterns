@@ -1,14 +1,15 @@
 #!/bin/bash
 # ============================================================================
-# SCRIPT: PYTHON EXECUTOR
+# SCRIPT: CODE EXECUTOR
 # AUTHOR: Enrique Fonseca
 # DATE:   2025-06-03
-# REV:    1.2.A (Valid are A, B, D, T and P)
-# (For Alpha, Beta, Dev, Test and Production)
+# REV:    0.0.1 (Valid are A, B, D, T and P)
+#               (For Alpha, Beta, Dev, Test and Production)
 #
 # PLATFORM: Linux
 #
-# PURPOSE: Clear and necessary description of the task
+# PURPOSE: Execute python scripts adding required common libraries to the
+#          PYTHONPATH and executing it in a virtual environment.
 #
 # REV LIST:
 #     DATE: DATE_of_REVISION
@@ -65,16 +66,9 @@ trap cleanup EXIT
 # -----------------------------------------------------------------------------
 readonly SCRIPT_NAME="$(basename "$0")"
 
-if [[ "${SPARK_HOME:-}" == "/opt/bitnami/spark" ]]; then
-    log_info "Executing inside Bitnami Spark container."
-    readonly DEFAULT_PYENV_NAME="python"
-    readonly DEFAULT_PYENV_ROOT="/opt/bitnami/"
-    readonly DEFAULT_PYENV_BIN="${DEFAULT_PYENV_ROOT}/${DEFAULT_PYENV_NAME}/bin/python"
-else
-    readonly DEFAULT_PYENV_NAME="remix_code_challenge"
-    readonly DEFAULT_PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
-    readonly DEFAULT_PYENV_BIN="${DEFAULT_PYENV_ROOT}/versions/${DEFAULT_PYENV_NAME}/bin/python"
-fi
+readonly DEFAULT_PYENV_NAME="apache_spark_practice"
+readonly DEFAULT_PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
+readonly DEFAULT_PYENV_BIN="${DEFAULT_PYENV_ROOT}/versions/${DEFAULT_PYENV_NAME}/bin/python"
 
 # -----------------------------------------------------------------------------
 # Usage / Help
